@@ -22,17 +22,15 @@ app.get("/", (req, res) => {
 app.post("/chat", async (req, res) => {
   try {
     const { messages } = req.body;
+    console.log("Incoming messages:", messages);
 
-    if (!messages) {
-      return res.status(400).json({ error: "Messages are required" });
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: "Messages array is required" });
     }
 
     const response = await axios.post(
       "https://api.deepseek.com/chat/completions",
-      {
-        model: "deepseek-chat",
-        messages: messages,
-      },
+      { model: "deepseek-chat", messages },
       {
         headers: {
           "Content-Type": "application/json",
@@ -41,10 +39,11 @@ app.post("/chat", async (req, res) => {
       }
     );
 
+    console.log("DeepSeek response:", response.data);
     res.json(response.data.choices[0].message);
   } catch (error) {
     console.error("DeepSeek error:", error.response?.data || error.message);
-    res.status(500).json({ error: "DeepSeek request failed" });
+    res.status(500).json({ error: "DeepSeek request failed", details: error.response?.data });
   }
 });
 
