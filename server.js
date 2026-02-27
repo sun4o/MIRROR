@@ -25,10 +25,9 @@ app.post("/chat", async (req, res) => {
       return res.status(400).json({ error: "Messages array is required" });
     }
 
-    console.log("💬 Incoming message:", messages[messages.length - 1].content);
+    console.log("💬 Incoming message:", messages[messages.length - 1]?.content);
     console.log("🔬 Lab mode:", labMode);
 
-    // Обрабатываем сообщение через mirrorModule
     const response = await processMessage(messages, labMode);
     
     console.log("📦 Response:", response);

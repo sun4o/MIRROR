@@ -7,35 +7,36 @@ let labObjects = [];
 // Системный промпт для DeepSeek
 const SYSTEM_PROMPT = `
 Ты — MIRROR, AI-ассистент для 3D лаборатории.
-Твоя задача — помогать пользователю и управлять 3D объектами.
 
-ПРАВИЛА:
-1. Отвечай дружелюбно и по делу
-2. Если пользователь просит создать/изменить/удалить объект — добавь команду
-3. Если просто болтает — отвечай без команд
-4. Координаты объектов всегда в формате [x, y, z] в диапазоне [-3, 3]
+ВАЖНЫЕ ПРАВИЛА:
+1. Всегда используй РЕАЛЬНЫЕ ID объектов, которые я тебе передаю в контексте
+2. Если не знаешь ID — не предлагай update/delete
+3. Для новых объектов ID не нужен — создастся автоматически
+4. Координаты в формате [x, y, z] от -3 до 3
 
-ФОРМАТ ОТВЕТА (всегда JSON):
+ФОРМАТ ОТВЕТА (только JSON, никакого другого текста):
 {
-  "reply": "текст для пользователя",
+  "reply": "текст пользователю",
   "commands": [
     { 
-      "type": "create" | "update" | "delete",
-      "params": {
-        // Для create: цвет, размер, позиция (опционально)
-        // Для update: id, новые параметры
-        // Для delete: id
-      }
+      "type": "create", 
+      "params": { "shape": "sphere", "color": "#00ffff", "size": 0.5 }
+    },
+    { 
+      "type": "update", 
+      "params": { "id": 123456789, "color": "#ff0000" }
+    },
+    { 
+      "type": "delete", 
+      "params": { "id": 123456789 }
     }
   ]
 }
 
 Примеры:
-1. Просто болтовня: { "reply": "Привет! Как дела?", "commands": [] }
-2. Создать объект: { "reply": "Создаю красный куб", "commands": [{ "type": "create", "params": { "color": "red", "shape": "cube" } }] }
-3. Передвинуть: { "reply": "Перемещаю объект", "commands": [{ "type": "update", "params": { "id": 123, "position": [1, 2, 3] } }] }
-
-Запомни: ТОЛЬКО JSON, никакого другого текста!
+1. Создать объект: { "reply": "Создаю красный куб", "commands": [{ "type": "create", "params": { "shape": "cube", "color": "red" } }] }
+2. Обновить цвет: { "reply": "Меняю цвет на синий", "commands": [{ "type": "update", "params": { "id": 1772231404457.8867, "color": "blue" } }] }
+3. Удалить объект: { "reply": "Удаляю объект", "commands": [{ "type": "delete", "params": { "id": 1772231404457.8867 } }] }
 `;
 
 function randomPosition(radius = 2.5) {
@@ -61,6 +62,7 @@ function executeCommands(commands) {
             ...cmd.params
           };
           labObjects.push(newObj);
+          console.log(`✅ Создан объект с ID: ${newObj.id}`);
           results.push({ type: 'create', ...newObj });
           break;
           
@@ -68,7 +70,10 @@ function executeCommands(commands) {
           const objToUpdate = labObjects.find(o => o.id === cmd.params.id);
           if (objToUpdate) {
             Object.assign(objToUpdate, cmd.params);
+            console.log(`✅ Обновлен объект ID: ${cmd.params.id}`);
             results.push({ type: 'update', ...objToUpdate });
+          } else {
+            console.log(`❌ Объект с ID ${cmd.params.id} не найден!`);
           }
           break;
           
@@ -77,6 +82,7 @@ function executeCommands(commands) {
           if (index !== -1) {
             const deleted = labObjects[index];
             labObjects.splice(index, 1);
+            console.log(`✅ Удален объект ID: ${cmd.params.id}`);
             results.push({ type: 'delete', id: cmd.params.id });
           }
           break;
@@ -91,13 +97,41 @@ function executeCommands(commands) {
 
 export async function processMessage(messages, labMode = false) {
   try {
-    // Добавляем системный промпт к сообщениям
+    console.log("🔵 ===== НОВЫЙ ЗАПРОС =====");
+    console.log("📨 Сообщение:", messages[messages.length - 1]?.content);
+    console.log("🔬 Lab mode:", labMode);
+    console.log("📦 Текущие объекты:", JSON.stringify(labObjects, null, 2));
+
+    // Создаем контекст с текущими объектами
+    const objectsContext = labObjects.length > 0 
+      ? `\n\nТекущие объекты в лаборатории (используй эти ID для update/delete):\n${
+          JSON.stringify(labObjects.map(o => ({
+            id: o.id,
+            shape: o.shape,
+            color: o.color,
+            position: o.position,
+            size: o.size
+          })), null, 2)
+        }`
+      : '\n\nВ лаборатории пока нет объектов. Создай первый объект по запросу пользователя.';
+
+    // Проверка на "последний объект" в запросе
+    const lastMessage = messages[messages.length - 1]?.content.toLowerCase() || '';
+    if (labObjects.length > 0 && (lastMessage.includes('последний') || lastMessage.includes('этот'))) {
+      const lastObj = labObjects[labObjects.length - 1];
+      messages[messages.length - 1].content += ` (ID последнего объекта: ${lastObj.id})`;
+      console.log(`🆔 Добавлен ID последнего объекта: ${lastObj.id}`);
+    }
+
     const messagesWithSystem = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { 
+        role: "system", 
+        content: SYSTEM_PROMPT + objectsContext
+      },
       ...messages
     ];
 
-    // Отправляем запрос к DeepSeek
+    console.log("🟡 Отправляю запрос в DeepSeek...");
     const response = await axios.post(
       "https://api.deepseek.com/chat/completions",
       {
@@ -114,47 +148,48 @@ export async function processMessage(messages, labMode = false) {
       }
     );
 
-    // Получаем ответ AI
     const aiMessage = response.data.choices[0].message.content;
-    console.log("🤖 Raw AI response:", aiMessage);
+    console.log("🤖 Сырой ответ DeepSeek:", aiMessage);
 
-    // Парсим JSON из ответа
     let parsed;
     try {
-      // Ищем JSON в ответе (на случай если AI добавит лишний текст)
       const jsonMatch = aiMessage.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : aiMessage);
+      console.log("✅ Распарсенный JSON:", JSON.stringify(parsed, null, 2));
     } catch (e) {
-      console.error("Failed to parse AI response as JSON:", e);
-      // Fallback: возвращаем текст как есть
+      console.error("❌ Ошибка парсинга JSON:", e);
       return {
         reply: aiMessage,
-        commands: []
+        commands: [],
+        objects: labObjects
       };
     }
 
-    // Выполняем команды только в режиме лаборатории
+    console.log("🟢 Выполняю команды в режиме лаборатории:", labMode);
     const executedCommands = labMode ? executeCommands(parsed.commands || []) : [];
+    console.log("✅ Выполненные команды:", JSON.stringify(executedCommands, null, 2));
+    console.log("📦 Объекты после выполнения:", JSON.stringify(labObjects, null, 2));
 
-    // Возвращаем результат
-    return {
+    const result = {
       reply: parsed.reply || "Готово!",
       commands: executedCommands,
-      objects: labObjects // Отправляем текущее состояние всех объектов
+      objects: labObjects
     };
+    console.log("📤 Отправляю на фронт:", JSON.stringify(result, null, 2));
+    console.log("🔵 ===== КОНЕЦ ЗАПРОСА =====\n");
+    
+    return result;
 
   } catch (error) {
-    console.error("Mirror module error:", error.response?.data || error.message);
+    console.error("❌ Mirror module error:", error.response?.data || error.message);
     throw error;
   }
 }
 
-// Функция для получения всех объектов (можно добавить эндпоинт)
 export function getObjects() {
   return labObjects;
 }
 
-// Функция для очистки (для тестов)
 export function clearObjects() {
   labObjects = [];
 }
