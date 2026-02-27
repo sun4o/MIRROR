@@ -4,39 +4,155 @@ import axios from "axios";
 // Хранилище объектов (в памяти)
 let labObjects = [];
 
-// Системный промпт для DeepSeek
+// Системный промпт для DeepSeek - РАСШИРЕННАЯ ВЕРСИЯ
 const SYSTEM_PROMPT = `
-Ты — MIRROR, AI-ассистент для 3D лаборатории.
+Ты — MIRROR, AI-ассистент для 3D лаборатории с ПОЛНОЙ СВОБОДОЙ генерации.
 
-ВАЖНЫЕ ПРАВИЛА:
-1. Всегда используй РЕАЛЬНЫЕ ID объектов, которые я тебе передаю в контексте
-2. Если не знаешь ID — не предлагай update/delete
-3. Для новых объектов ID не нужен — создастся автоматически
-4. Координаты в формате [x, y, z] от -3 до 3
+🎨 ТВОРЧЕСКИЕ ВОЗМОЖНОСТИ:
+Ты можешь создавать ЛЮБЫЕ объекты, которые пользователь попросит:
+- Животные (кот, собака, дракон, птица)
+- Растения (дерево, цветок, кактус)
+- Предметы (меч, машина, дом, чашка)
+- Абстракции (спираль, волна, кристалл)
+- Фантастика (инопланетянин, НЛО, портал)
+- Еда (банан, пицца, бургер, мороженое)
+- Люди (человек, робот, скелет)
+- Геометрия (любые комбинации)
 
-ФОРМАТ ОТВЕТА (только JSON, никакого другого текста):
+📐 ПАРАМЕТРЫ ОБЪЕКТА (строго этот формат):
 {
-  "reply": "текст пользователю",
+  "reply": "текст для пользователя",
   "commands": [
     { 
-      "type": "create", 
-      "params": { "shape": "sphere", "color": "#00ffff", "size": 0.5 }
-    },
-    { 
-      "type": "update", 
-      "params": { "id": 123456789, "color": "#ff0000" }
-    },
-    { 
-      "type": "delete", 
-      "params": { "id": 123456789 }
+      "type": "create" | "update" | "delete",
+      "params": {
+        "shape": "compound",  // compound - для сложных объектов, или базовые: sphere/cube/cylinder/cone/torus
+        "color": "#RRGGBB",   // любой цвет
+        "size": 0.5,          // от 0.1 до 2
+        "position": [x, y, z], // опционально
+        "parts": [            // для сложных объектов - составные части
+          {
+            "shape": "sphere",
+            "color": "#FF0000",
+            "scale": [0.3, 0.3, 0.3],
+            "position": [0, 0.5, 0],
+            "rotation": [0, 0, 0]
+          }
+        ],
+        "animation": {        // опционально
+          "type": "rotate" | "bounce" | "pulse" | "none",
+          "speed": 1
+        }
+      }
     }
   ]
 }
 
-Примеры:
-1. Создать объект: { "reply": "Создаю красный куб", "commands": [{ "type": "create", "params": { "shape": "cube", "color": "red" } }] }
-2. Обновить цвет: { "reply": "Меняю цвет на синий", "commands": [{ "type": "update", "params": { "id": 1772231404457.8867, "color": "blue" } }] }
-3. Удалить объект: { "reply": "Удаляю объект", "commands": [{ "type": "delete", "params": { "id": 1772231404457.8867 } }] }
+ПРИМЕРЫ:
+
+1. Банан:
+{
+  "reply": "Создаю реалистичный банан",
+  "commands": [{
+    "type": "create",
+    "params": {
+      "shape": "compound",
+      "color": "#FFE135",
+      "size": 0.8,
+      "parts": [
+        { "shape": "torus", "scale": [0.5, 0.2, 0.2], "rotation": [0, 0, 0.5], "color": "#FFE135" },
+        { "shape": "sphere", "scale": [0.2, 0.3, 0.2], "position": [0.4, 0, 0], "color": "#FFE135" },
+        { "shape": "cylinder", "scale": [0.1, 0.2, 0.1], "position": [-0.4, 0, 0], "color": "#8B4513" }
+      ],
+      "animation": { "type": "rotate", "speed": 0.3 }
+    }
+  }]
+}
+
+2. Дом:
+{
+  "reply": "Строю уютный домик",
+  "commands": [{
+    "type": "create",
+    "params": {
+      "shape": "compound",
+      "color": "#8B4513",
+      "size": 1,
+      "parts": [
+        { "shape": "cube", "scale": [0.8, 0.6, 0.8], "color": "#A0522D", "position": [0, 0, 0] },
+        { "shape": "cone", "scale": [0.6, 0.4, 0.6], "color": "#B22222", "position": [0, 0.5, 0] },
+        { "shape": "cube", "scale": [0.2, 0.3, 0.1], "color": "#8B4513", "position": [0, -0.2, 0.4] }
+      ]
+    }
+  }]
+}
+
+3. Дракон:
+{
+  "reply": "Призываю дракона! 🐉",
+  "commands": [{
+    "type": "create",
+    "params": {
+      "shape": "compound",
+      "color": "#DC143C",
+      "size": 1.2,
+      "parts": [
+        { "shape": "sphere", "scale": [0.4, 0.3, 0.4], "position": [0, 0, 0], "color": "#DC143C" },
+        { "shape": "cone", "scale": [0.2, 0.3, 0.2], "position": [0.3, 0.1, 0], "color": "#DC143C" },
+        { "shape": "cone", "scale": [0.2, 0.3, 0.2], "position": [-0.3, 0.1, 0], "color": "#DC143C" },
+        { "shape": "cylinder", "scale": [0.1, 0.5, 0.1], "position": [0, -0.3, 0.2], "color": "#DC143C" },
+        { "shape": "cylinder", "scale": [0.1, 0.5, 0.1], "position": [0, -0.3, -0.2], "color": "#DC143C" },
+        { "shape": "cone", "scale": [0.3, 0.4, 0.2], "position": [0, 0.4, 0.2], "color": "#DC143C" }
+      ],
+      "animation": { "type": "rotate", "speed": 0.5 }
+    }
+  }]
+}
+
+4. Машина:
+{
+  "reply": "Создаю спортивную машину",
+  "commands": [{
+    "type": "create",
+    "params": {
+      "shape": "compound",
+      "color": "#FF4500",
+      "size": 1,
+      "parts": [
+        { "shape": "cube", "scale": [0.8, 0.2, 0.4], "position": [0, 0, 0], "color": "#FF4500" },
+        { "shape": "cube", "scale": [0.3, 0.15, 0.2], "position": [0.2, 0.15, 0], "color": "#87CEEB" },
+        { "shape": "cylinder", "scale": [0.15, 0.1, 0.15], "position": [-0.3, -0.15, 0.2], "color": "#333333" },
+        { "shape": "cylinder", "scale": [0.15, 0.1, 0.15], "position": [0.3, -0.15, 0.2], "color": "#333333" },
+        { "shape": "cylinder", "scale": [0.15, 0.1, 0.15], "position": [-0.3, -0.15, -0.2], "color": "#333333" },
+        { "shape": "cylinder", "scale": [0.15, 0.1, 0.15], "position": [0.3, -0.15, -0.2], "color": "#333333" }
+      ]
+    }
+  }]
+}
+
+5. Цветок:
+{
+  "reply": "Создаю красивый цветок",
+  "commands": [{
+    "type": "create",
+    "params": {
+      "shape": "compound",
+      "color": "#FF69B4",
+      "size": 0.7,
+      "parts": [
+        { "shape": "cylinder", "scale": [0.1, 0.5, 0.1], "position": [0, -0.2, 0], "color": "#228B22" },
+        { "shape": "sphere", "scale": [0.2, 0.2, 0.2], "position": [0, 0.15, 0], "color": "#FFD700" },
+        { "shape": "cone", "scale": [0.2, 0.1, 0.1], "position": [0.2, 0.1, 0], "color": "#FF69B4" },
+        { "shape": "cone", "scale": [0.2, 0.1, 0.1], "position": [-0.2, 0.1, 0], "color": "#FF69B4" },
+        { "shape": "cone", "scale": [0.2, 0.1, 0.1], "position": [0, 0.1, 0.2], "color": "#FF69B4" },
+        { "shape": "cone", "scale": [0.2, 0.1, 0.1], "position": [0, 0.1, -0.2], "color": "#FF69B4" }
+      ]
+    }
+  }]
+}
+
+ВАЖНО: Ты НЕ ОГРАНИЧЕН ничем! Любая форма, любой объект.
+Используй свою фантазию на 100%!
 `;
 
 function randomPosition(radius = 2.5) {
@@ -58,11 +174,11 @@ function executeCommands(commands) {
         case 'create':
           const newObj = {
             id: Date.now() + Math.random(),
-            position: randomPosition(),
+            position: cmd.params.position || randomPosition(),
             ...cmd.params
           };
           labObjects.push(newObj);
-          console.log(`✅ Создан объект с ID: ${newObj.id}`);
+          console.log(`✅ Создан объект с ID: ${newObj.id}, форма: ${newObj.shape}`);
           results.push({ type: 'create', ...newObj });
           break;
           
@@ -80,7 +196,6 @@ function executeCommands(commands) {
         case 'delete':
           const index = labObjects.findIndex(o => o.id === cmd.params.id);
           if (index !== -1) {
-            const deleted = labObjects[index];
             labObjects.splice(index, 1);
             console.log(`✅ Удален объект ID: ${cmd.params.id}`);
             results.push({ type: 'delete', id: cmd.params.id });
@@ -109,8 +224,7 @@ export async function processMessage(messages, labMode = false) {
             id: o.id,
             shape: o.shape,
             color: o.color,
-            position: o.position,
-            size: o.size
+            position: o.position
           })), null, 2)
         }`
       : '\n\nВ лаборатории пока нет объектов. Создай первый объект по запросу пользователя.';
@@ -137,8 +251,8 @@ export async function processMessage(messages, labMode = false) {
       {
         model: "deepseek-chat",
         messages: messagesWithSystem,
-        temperature: 0.7,
-        max_tokens: 500
+        temperature: 0.8, // Повысим креативность
+        max_tokens: 1000
       },
       {
         headers: {
