@@ -1,49 +1,70 @@
-// index.js
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import { processMessage } from "./mirrorModule.js";
+import fs from 'fs';
+import path from 'path';
 
-dotenv.config();
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(cors());
-app.use(express.json());
-
-app.get("/", (req, res) => {
-  res.send("MIRROR backend is running 🚀");
-});
-
-// ЕДИНСТВЕННЫЙ эндпоинт /chat
-app.post("/chat", async (req, res) => {
+// ============= НОВЫЙ ЭНДПОИНТ ДЛЯ ГЕНЕРАЦИИ КОДА =============
+app.post('/generate-code', async (req, res) => {
   try {
-    const { messages, labMode } = req.body;
+    const { prompt } = req.body;
     
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({ error: "Messages array is required" });
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required" });
     }
 
-    console.log("💬 Incoming message:", messages[messages.length - 1]?.content);
-    console.log("🔬 Lab mode:", labMode);
+    console.log(`🤖 DeepSeek генерирует код для: "${prompt}"`);
 
-    const response = await processMessage(messages, labMode);
+    // Запрос к DeepSeek
+    const response = await axios.post(
+      'https://api.deepseek.com/chat/completions',
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { 
+            role: 'system', 
+            content: `ТЫ — ГЕНЕРАТОР 3D ОБЪЕКТОВ. Создай ПОЛНОЦЕННЫЙ JavaScript файл.
+
+ТРЕБОВАНИЯ:
+1. Файл должен экспортировать функцию create_${prompt.replace(/\s+/g, '_')}(THREE)
+2. Используй текстуры (Canvas или dataURI)
+3. Добавь анимацию (функция update)
+4. Добавь физику (гравитация, столкновения)
+5. Минимум 5-10 частей
+6. Подробные комментарии
+
+ВЕРНИ ТОЛЬКО КОД, БЕЗ ПОЯСНЕНИЙ.` 
+          },
+          { role: 'user', content: `Создай 3D объект: ${prompt} с текстурами, анимацией и физикой` }
+        ],
+        temperature: 0.7,
+        max_tokens: 4000
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        },
+      }
+    );
+
+    const code = response.data.choices[0].message.content;
     
-    console.log("📦 Response:", response);
-    res.json(response);
+    // Создаём имя файла
+    const filename = `${prompt.replace(/\s+/g, '_')}_${Date.now()}.js`;
+    const filePath = path.join('./generated', filename);
+    
+    // Сохраняем файл
+    fs.writeFileSync(filePath, code);
+    
+    console.log(`✅ Файл сохранён: ${filename}`);
+
+    res.json({ 
+      success: true, 
+      filename,
+      code,
+      message: `Файл ${filename} создан и сохранён на сервере`
+    });
 
   } catch (error) {
-    console.error("❌ Server error:", error);
-    res.status(500).json({ 
-      error: "Server failed", 
-      details: error.message,
-      reply: "Извините, произошла ошибка. Попробуйте еще раз.",
-      commands: []
-    });
+    console.error("❌ Ошибка:", error);
+    res.status(500).json({ error: error.message });
   }
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 MIRROR backend running on port ${PORT}`);
 });
