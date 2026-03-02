@@ -70,17 +70,36 @@ app.post('/generate-code', async (req, res) => {
 
     console.log(`🤖 DeepSeek генерирует код для: "${prompt}"`);
 
-    const systemPrompt = `ТЫ — ГЕНЕРАТОР 3D ОБЪЕКТОВ. Создай ПОЛНОЦЕННЫЙ JavaScript файл.
+    const systemPrompt = `ТЫ — ГЕНЕРАТОР 3D ОБЪЕКТОВ.
 
-ТРЕБОВАНИЯ:
-1. Файл должен экспортировать функцию create_${prompt.replace(/\s+/g, '_')}(THREE)
-2. Используй текстуры (Canvas или dataURI)
-3. Добавь анимацию (функция update)
-4. Добавь физику (гравитация, столкновения)
-5. Минимум 5-10 частей
-6. Подробные комментарии
+Создай функцию с именем create_${prompt.replace(/\s+/g, '_')}(THREE), которая:
+1. Возвращает THREE.Group
+2. Содержит минимум 5 частей
+3. Использует разные цвета
 
-ВЕРНИ ТОЛЬКО КОД, БЕЗ ПОЯСНЕНИЙ.`;
+ВЕРНИ ТОЛЬКО КОД, БЕЗ ПОЯСНЕНИЙ.
+
+ПРИМЕР:
+function create_машина(THREE) {
+  const group = new THREE.Group();
+  
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 0.3, 0.5),
+    new THREE.MeshStandardMaterial({ color: 0xff0000 })
+  );
+  body.position.set(0, 0.2, 0);
+  group.add(body);
+  
+  const wheel1 = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.15, 0.15, 0.1, 8),
+    new THREE.MeshStandardMaterial({ color: 0x333333 })
+  );
+  wheel1.position.set(-0.3, 0.05, 0.25);
+  wheel1.rotation.z = Math.PI/2;
+  group.add(wheel1);
+  
+  return group;
+}`;
 
     const response = await axios.post(
       'https://api.deepseek.com/chat/completions',
