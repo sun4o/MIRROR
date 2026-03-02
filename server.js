@@ -70,51 +70,17 @@ app.post('/generate-code', async (req, res) => {
 
     console.log(`🤖 DeepSeek генерирует код для: "${prompt}"`);
 
-    const systemPrompt = `ТЫ — ГЕНЕРАТОР 3D ОБЪЕКТОВ.
+   const systemPrompt = `ТЫ — ГЕНЕРАТОР 3D ОБЪЕКТОВ.
 
-ВАЖНО: НЕ ИСПОЛЬЗУЙ:
-- createImageBitmap
-- Canvas
-- текстуры
-- Promise
-- await
-- import
-- export
-- CANNON (физику)
+ВАЖНО: ИСПОЛЬЗУЙ ТОЛЬКО АНГЛИЙСКИЕ НАЗВАНИЯ!
 
-ИСПОЛЬЗУЙ ТОЛЬКО:
-- THREE.Group
-- THREE.Mesh
-- THREE.BoxGeometry
-- THREE.SphereGeometry
-- THREE.CylinderGeometry
-- THREE.ConeGeometry
-- THREE.TorusGeometry
-- THREE.MeshStandardMaterial
-- colors (0xRRGGBB)
-- position.set()
-- scale.set()
-- rotation.set()
+Создай функцию с именем createCar(THREE) или createSword(THREE) или createDragon(THREE) в зависимости от запроса.
 
-Создай функцию с именем create_${prompt.replace(/\s+/g, '_')}(THREE) которая возвращает THREE.Group.
-
-Минимум 5 частей. Разные цвета.
+НЕ ИСПОЛЬЗУЙ РУССКИЕ БУКВЫ В ИМЕНАХ ФУНКЦИЙ!
 
 ВЕРНИ ТОЛЬКО КОД, БЕЗ ПОЯСНЕНИЙ.
 
-ПРИМЕР:
-function create_машина(THREE) {
-  const group = new THREE.Group();
-  
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 0.3, 0.5),
-    new THREE.MeshStandardMaterial({ color: 0xff0000 })
-  );
-  body.position.set(0, 0.2, 0);
-  group.add(body);
-  
-  return group;
-}`;
+Запрос пользователя: ${prompt}`;
 
     const response = await axios.post(
       'https://api.deepseek.com/chat/completions',
