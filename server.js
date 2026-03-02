@@ -72,10 +72,33 @@ app.post('/generate-code', async (req, res) => {
 
     const systemPrompt = `ТЫ — ГЕНЕРАТОР 3D ОБЪЕКТОВ.
 
-Создай функцию с именем create_${prompt.replace(/\s+/g, '_')}(THREE), которая:
-1. Возвращает THREE.Group
-2. Содержит минимум 5 частей
-3. Использует разные цвета
+ВАЖНО: НЕ ИСПОЛЬЗУЙ:
+- createImageBitmap
+- Canvas
+- текстуры
+- Promise
+- await
+- import
+- export
+- CANNON (физику)
+
+ИСПОЛЬЗУЙ ТОЛЬКО:
+- THREE.Group
+- THREE.Mesh
+- THREE.BoxGeometry
+- THREE.SphereGeometry
+- THREE.CylinderGeometry
+- THREE.ConeGeometry
+- THREE.TorusGeometry
+- THREE.MeshStandardMaterial
+- colors (0xRRGGBB)
+- position.set()
+- scale.set()
+- rotation.set()
+
+Создай функцию с именем create_${prompt.replace(/\s+/g, '_')}(THREE) которая возвращает THREE.Group.
+
+Минимум 5 частей. Разные цвета.
 
 ВЕРНИ ТОЛЬКО КОД, БЕЗ ПОЯСНЕНИЙ.
 
@@ -89,14 +112,6 @@ function create_машина(THREE) {
   );
   body.position.set(0, 0.2, 0);
   group.add(body);
-  
-  const wheel1 = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.15, 0.15, 0.1, 8),
-    new THREE.MeshStandardMaterial({ color: 0x333333 })
-  );
-  wheel1.position.set(-0.3, 0.05, 0.25);
-  wheel1.rotation.z = Math.PI/2;
-  group.add(wheel1);
   
   return group;
 }`;
