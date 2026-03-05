@@ -44,7 +44,7 @@ app.use('/generated', express.static(generatedDir));
 app.use('/uploads', express.static(uploadsDir));
 
 // ============= TRIPOSR URL =============
-const TRIPOSR_URL = 'http://127.0.0.1:7860'; // Локальный TripoSR
+const TRIPOSR_URL = 'https://199562a92228b9e229.gradio.live/'; // Локальный TripoSR
 
 // Проверка сервера
 app.get("/", (req, res) => {
