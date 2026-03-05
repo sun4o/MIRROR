@@ -44,7 +44,7 @@ app.use('/generated', express.static(generatedDir));
 app.use('/uploads', express.static(uploadsDir));
 
 // ============= TRIPOSR URL =============
-const TRIPOSR_URL = 'https://199562a92228b9e229.gradio.live/'; // Локальный TripoSR
+const TRIPOSR_URL = 'https://189d616e3137164fbd.gradio.live/'; // Локальный TripoSR
 
 // Проверка сервера
 app.get("/", (req, res) => {
@@ -154,7 +154,6 @@ app.post('/generate-code', async (req, res) => {
 });
 
 // ============= ГЕНЕРАЦИЯ 3D ИЗ ИЗОБРАЖЕНИЯ ЧЕРЕЗ GRADIO CLIENT =============
-// ============= ГЕНЕРАЦИЯ 3D ИЗ ИЗОБРАЖЕНИЯ (ИСПРАВЛЕННАЯ) =============
 app.post('/generate-from-image', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -162,64 +161,44 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
     }
 
     console.log(`📸 Получено изображение: ${req.file.originalname}`);
-    console.log(`🔄 Подключение к TripoSR: ${TRIPOSR_URL}`);
     
-    // Используем gradio_client
-    const { Client, handle_file } = await import('@gradio/client');
-    
-    // Подключаемся к твоему TripoSR
+    // Подключаемся к TripoSR
     const client = await Client.connect(TRIPOSR_URL);
     
-    // Шаг 1: Проверяем изображение (опционально, но рекомендуется)
-    console.log("🔄 Шаг 1: Проверка изображения...");
+    // Шаг 1: Проверяем изображение
+    console.log("🔄 Проверка изображения...");
     await client.predict("/check_input_image", {
       input_image: handle_file(req.file.path)
     });
     
-    // Шаг 2: Препроцессинг изображения
-    console.log("🔄 Шаг 2: Препроцессинг...");
+    // Шаг 2: Препроцессинг
+    console.log("🔄 Препроцессинг...");
     const preprocessResult = await client.predict("/preprocess", {
       input_image: handle_file(req.file.path),
       do_remove_background: true,
       foreground_ratio: 0.85
     });
     
-    // preprocessResult.data содержит обработанное изображение
-    // Это строка с путём к временному файлу или base64
-    const processedImage = preprocessResult.data;
-    
     // Шаг 3: Генерация 3D модели
-    console.log("🔄 Шаг 3: Генерация 3D модели...");
+    console.log("🔄 Генерация 3D модели...");
     const generateResult = await client.predict("/generate", {
-      image: processedImage,
+      image: preprocessResult.data,
       mc_resolution: 256
     });
     
-    // Результат содержит два файла: OBJ и GLB
     // generateResult.data[0] - OBJ файл
-    // generateResult.data[1] - GLB файл
-    
-    console.log("📦 Результат генерации:", generateResult.data);
-    
-    // Сохраняем OBJ файл
-    const objData = generateResult.data[0];
+    const modelData = generateResult.data[0];
     const modelPath = path.join(generatedDir, `model_${Date.now()}.obj`);
     
-    // OBJ данные могут быть в разных форматах
-    if (typeof objData === 'string' && objData.startsWith('http')) {
-      // Если пришёл URL
-      const response = await axios.get(objData, { responseType: 'arraybuffer' });
+    // Сохраняем модель
+    if (modelData.url) {
+      const response = await axios.get(modelData.url, { responseType: 'arraybuffer' });
       fs.writeFileSync(modelPath, response.data);
-    } else if (objData && objData.url) {
-      // Если пришёл объект с URL
-      const response = await axios.get(objData.url, { responseType: 'arraybuffer' });
-      fs.writeFileSync(modelPath, response.data);
-    } else if (objData && objData.path) {
-      // Если пришёл путь к файлу
-      fs.copyFileSync(objData.path, modelPath);
+    } else if (modelData.path) {
+      fs.copyFileSync(modelData.path, modelPath);
     } else {
-      // Если пришли сырые данные
-      fs.writeFileSync(modelPath, objData);
+      // Если пришёл сам файл
+      fs.writeFileSync(modelPath, modelData);
     }
     
     // Удаляем временный файл
@@ -239,13 +218,6 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
     if (req.file) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
-    
-    // Подробный вывод ошибки
-    console.error("Детали ошибки:", {
-      message: error.message,
-      stack: error.stack,
-      response: error.response?.data
-    });
     
     res.status(500).json({ 
       success: false, 
