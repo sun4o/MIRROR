@@ -1,4 +1,3 @@
-// server.js - ПОЛНЫЙ ФАЙЛ С TRIPOSR
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -7,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import FormData from 'form-data';
+import { Client, handle_file } from '@gradio/client';
 
 dotenv.config();
 
@@ -44,8 +43,8 @@ app.use(express.json());
 app.use('/generated', express.static(generatedDir));
 app.use('/uploads', express.static(uploadsDir));
 
-// ============= TRIPOSR НАСТРОЙКИ =============
-const TRIPOSR_URL = 'https://2265ccf2e6129b9525.gradio.live'; // Colab ссылка
+// ============= TRIPOSR URL =============
+const TRIPOSR_URL = 'http://127.0.0.1:7860'; // Локальный TripoSR
 
 // Проверка сервера
 app.get("/", (req, res) => {
@@ -92,7 +91,7 @@ app.post('/generate-code', async (req, res) => {
 
     console.log(`🤖 DeepSeek генерирует код для: "${prompt}"`);
 
-   const systemPrompt = `ТЫ — ГЕНЕРАТОР 3D ОБЪЕКТОВ.
+    const systemPrompt = `ТЫ — ГЕНЕРАТОР 3D ОБЪЕКТОВ.
 
 ВАЖНО: ИСПОЛЬЗУЙ ТОЛЬКО АНГЛИЙСКИЕ НАЗВАНИЯ!
 
@@ -141,7 +140,7 @@ app.post('/generate-code', async (req, res) => {
     res.json({ 
       success: true, 
       filename,
-      code: code.substring(0, 500) + '...', // Отправляем только начало
+      code: code.substring(0, 500) + '...',
       message: `Файл ${filename} создан и сохранён на сервере`
     });
 
@@ -154,7 +153,7 @@ app.post('/generate-code', async (req, res) => {
   }
 });
 
-// ============= НОВЫЙ: ГЕНЕРАЦИЯ 3D ИЗ ИЗОБРАЖЕНИЯ ЧЕРЕЗ TRIPOSR =============
+// ============= ГЕНЕРАЦИЯ 3D ИЗ ИЗОБРАЖЕНИЯ ЧЕРЕЗ GRADIO CLIENT =============
 app.post('/generate-from-image', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -162,61 +161,60 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
     }
 
     console.log(`📸 Получено изображение: ${req.file.originalname}`);
-    console.log(`🔄 Отправка в TripoSR (${TRIPOSR_URL})...`);
-
-    // Создаём FormData для отправки в TripoSR
-    const formData = new FormData();
-    formData.append('files', fs.createReadStream(req.file.path));
-
-    // Отправляем запрос в TripoSR
-    const response = await axios.post(`${TRIPOSR_URL}/run/predict`, {
-      data: [formData]
-    }, {
-      headers: {
-        ...formData.getHeaders(),
-        'Content-Type': 'multipart/form-data'
-      },
-      timeout: 120000 // 2 минуты таймаут
+    
+    // Подключаемся к TripoSR
+    const client = await Client.connect(TRIPOSR_URL);
+    
+    // Шаг 1: Проверяем изображение
+    console.log("🔄 Проверка изображения...");
+    await client.predict("/check_input_image", {
+      input_image: handle_file(req.file.path)
     });
-
-    console.log("✅ TripoSR ответил");
-
-    // TripoSR возвращает OBJ файл
-    let modelData;
-    let modelFormat = 'obj';
     
-    // Парсим ответ в зависимости от формата
-    if (response.data && response.data.data) {
-      modelData = response.data.data;
-    } else if (typeof response.data === 'string') {
-      modelData = response.data;
-    } else {
-      modelData = JSON.stringify(response.data);
-    }
-
+    // Шаг 2: Препроцессинг
+    console.log("🔄 Препроцессинг...");
+    const preprocessResult = await client.predict("/preprocess", {
+      input_image: handle_file(req.file.path),
+      do_remove_background: true,
+      foreground_ratio: 0.85
+    });
+    
+    // Шаг 3: Генерация 3D модели
+    console.log("🔄 Генерация 3D модели...");
+    const generateResult = await client.predict("/generate", {
+      image: preprocessResult.data,
+      mc_resolution: 256
+    });
+    
+    // generateResult.data[0] - OBJ файл
+    const modelData = generateResult.data[0];
+    const modelPath = path.join(generatedDir, `model_${Date.now()}.obj`);
+    
     // Сохраняем модель
-    const timestamp = Date.now();
-    const modelFilename = `model_${timestamp}.${modelFormat}`;
-    const modelPath = path.join(generatedDir, modelFilename);
+    if (modelData.url) {
+      const response = await axios.get(modelData.url, { responseType: 'arraybuffer' });
+      fs.writeFileSync(modelPath, response.data);
+    } else if (modelData.path) {
+      fs.copyFileSync(modelData.path, modelPath);
+    } else {
+      // Если пришёл сам файл
+      fs.writeFileSync(modelPath, modelData);
+    }
     
-    fs.writeFileSync(modelPath, modelData);
-    
-    // Удаляем временный файл изображения
+    // Удаляем временный файл
     fs.unlinkSync(req.file.path);
-
-    console.log(`💾 3D модель сохранена: ${modelFilename}`);
-
+    
+    console.log(`✅ 3D модель сохранена: ${path.basename(modelPath)}`);
+    
     res.json({ 
       success: true, 
-      modelUrl: `/generated/${modelFilename}`,
-      format: modelFormat,
-      message: "3D модель успешно создана из изображения"
+      modelUrl: `/generated/${path.basename(modelPath)}`,
+      message: "3D модель успешно создана"
     });
 
   } catch (error) {
-    console.error("❌ TripoSR ошибка:", error.response?.data || error.message);
+    console.error("❌ Ошибка TripoSR:", error);
     
-    // Если есть временный файл - удаляем
     if (req.file) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
@@ -224,12 +222,12 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: "Ошибка при генерации 3D модели",
-      details: error.response?.data || error.message 
+      details: error.message
     });
   }
 });
 
-// ============= НОВЫЙ: УЛУЧШЕНИЕ МОДЕЛИ ЧЕРЕЗ DEEPSEEK =============
+// ============= УЛУЧШЕНИЕ МОДЕЛИ ЧЕРЕЗ DEEPSEEK =============
 app.post('/enhance-3d', async (req, res) => {
   try {
     const { modelPath, prompt } = req.body;
@@ -240,11 +238,9 @@ app.post('/enhance-3d', async (req, res) => {
 
     console.log(`🎨 DeepSeek улучшает модель: ${modelPath} с запросом: "${prompt}"`);
 
-    // Читаем существующую модель
     const fullPath = path.join(__dirname, modelPath);
     const existingCode = fs.readFileSync(fullPath, 'utf8');
 
-    // Отправляем в DeepSeek для улучшения
     const response = await axios.post(
       'https://api.deepseek.com/chat/completions',
       {
@@ -275,7 +271,6 @@ app.post('/enhance-3d', async (req, res) => {
     let enhancedCode = response.data.choices[0].message.content;
     enhancedCode = enhancedCode.replace(/```javascript/g, '').replace(/```/g, '').trim();
 
-    // Сохраняем улучшенную версию
     const enhancedFilename = `enhanced_${Date.now()}.js`;
     const enhancedPath = path.join(generatedDir, enhancedFilename);
     
@@ -314,7 +309,7 @@ app.get('/generated-files', (req, res) => {
           type: file.split('.').pop()
         };
       })
-      .sort((a, b) => b.created - a.created); // Сначала новые
+      .sort((a, b) => b.created - a.created);
     
     res.json({ files });
   } catch (error) {
@@ -346,12 +341,10 @@ app.get('/file/:filename', (req, res) => {
 // ============= ПРОВЕРКА TRIPOSR СТАТУСА =============
 app.get('/triposr-status', async (req, res) => {
   try {
-    // Пробуем пинговать TripoSR
-    const response = await axios.get(`${TRIPOSR_URL}/`, { timeout: 5000 });
+    const client = await Client.connect(TRIPOSR_URL);
     res.json({ 
       online: true, 
-      url: TRIPOSR_URL,
-      status: response.status 
+      url: TRIPOSR_URL
     });
   } catch (error) {
     res.json({ 
