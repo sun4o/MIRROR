@@ -45,7 +45,7 @@ app.use('/generated', express.static(generatedDir));
 app.use('/uploads', express.static(uploadsDir));
 
 // ============= TRIPOSR НАСТРОЙКИ =============
-const TRIPOSR_URL = 'https://da199784b451871aac.gradio.live'; // Colab ссылка
+const TRIPOSR_URL = 'https://2265ccf2e6129b9525.gradio.live'; // Colab ссылка
 
 // Проверка сервера
 app.get("/", (req, res) => {
