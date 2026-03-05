@@ -154,6 +154,7 @@ app.post('/generate-code', async (req, res) => {
 });
 
 // ============= ГЕНЕРАЦИЯ 3D ИЗ ИЗОБРАЖЕНИЯ ЧЕРЕЗ GRADIO CLIENT =============
+// ============= ГЕНЕРАЦИЯ 3D ИЗ ИЗОБРАЖЕНИЯ =============
 app.post('/generate-from-image', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -161,51 +162,38 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
     }
 
     console.log(`📸 Получено изображение: ${req.file.originalname}`);
+    console.log(`🔄 Отправка в TripoSR: ${TRIPOSR_URL}`);
     
-    // Подключаемся к TripoSR
-    const client = await Client.connect(TRIPOSR_URL);
+    // Читаем файл и конвертируем в base64
+    const imageBuffer = fs.readFileSync(req.file.path);
+    const base64Image = imageBuffer.toString('base64');
     
-    // Шаг 1: Проверяем изображение
-    console.log("🔄 Проверка изображения...");
-    await client.predict("/check_input_image", {
-      input_image: handle_file(req.file.path)
+    // Отправляем запрос в TripoSR
+    const response = await axios.post(`${TRIPOSR_URL}/api/predict`, {
+      data: [base64Image]
+    }, {
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      timeout: 120000 // 2 минуты
     });
     
-    // Шаг 2: Препроцессинг
-    console.log("🔄 Препроцессинг...");
-    const preprocessResult = await client.predict("/preprocess", {
-      input_image: handle_file(req.file.path),
-      do_remove_background: true,
-      foreground_ratio: 0.85
-    });
+    console.log("✅ TripoSR ответил");
     
-    // Шаг 3: Генерация 3D модели
-    console.log("🔄 Генерация 3D модели...");
-    const generateResult = await client.predict("/generate", {
-      image: preprocessResult.data,
-      mc_resolution: 256
-    });
-    
-    // generateResult.data[0] - OBJ файл
-    const modelData = generateResult.data[0];
+    // Сохраняем результат
     const modelPath = path.join(generatedDir, `model_${Date.now()}.obj`);
     
-    // Сохраняем модель
-    if (modelData.url) {
-      const response = await axios.get(modelData.url, { responseType: 'arraybuffer' });
-      fs.writeFileSync(modelPath, response.data);
-    } else if (modelData.path) {
-      fs.copyFileSync(modelData.path, modelPath);
+    if (response.data && response.data.data) {
+      fs.writeFileSync(modelPath, response.data.data);
     } else {
-      // Если пришёл сам файл
-      fs.writeFileSync(modelPath, modelData);
+      fs.writeFileSync(modelPath, JSON.stringify(response.data));
     }
     
     // Удаляем временный файл
     fs.unlinkSync(req.file.path);
     
-    console.log(`✅ 3D модель сохранена: ${path.basename(modelPath)}`);
-    
+    console.log(`💾 3D модель сохранена: ${path.basename(modelPath)}`);
+
     res.json({ 
       success: true, 
       modelUrl: `/generated/${path.basename(modelPath)}`,
@@ -213,7 +201,7 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
     });
 
   } catch (error) {
-    console.error("❌ Ошибка TripoSR:", error);
+    console.error("❌ Ошибка TripoSR:", error.response?.data || error.message);
     
     if (req.file) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
@@ -222,7 +210,7 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: "Ошибка при генерации 3D модели",
-      details: error.message
+      details: error.response?.data || error.message
     });
   }
 });
