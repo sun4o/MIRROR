@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { Client, handle_file } from '@gradio/client';
+import { PythonShell } from 'python-shell';
 
 dotenv.config();
 
@@ -17,12 +18,16 @@ const PORT = process.env.PORT || 3000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const generatedDir = path.join(__dirname, 'generated');
 const uploadsDir = path.join(__dirname, 'uploads');
+const pythonDir = path.join(__dirname, 'python');
 
 if (!fs.existsSync(generatedDir)) {
   fs.mkdirSync(generatedDir);
 }
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
+}
+if (!fs.existsSync(pythonDir)) {
+  fs.mkdirSync(pythonDir);
 }
 
 // Настройка multer для загрузки файлов
@@ -222,7 +227,7 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: "Ошибка при генерации 3D модели",
-      details: error.message
+      details: error.message 
     });
   }
 });
@@ -356,8 +361,6 @@ app.get('/triposr-status', async (req, res) => {
 });
 
 // ============= 3D ИЗ ФОТО ЧЕРЕЗ YOLO =============
-import { PythonShell } from 'python-shell';
-
 app.post('/api/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) {
@@ -370,17 +373,26 @@ app.post('/api/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
     const prompt = req.body.prompt || 'object';
     const outputName = `yolo_${Date.now()}`;
     
-    // Путь к Python скрипту
-    const pythonScript = path.join(__dirname, 'python', 'processor.py');
+    // Проверяем существование Python скрипта
+    const pythonScriptPath = path.join(__dirname, 'python', 'processor.py');
+    if (!fs.existsSync(pythonScriptPath)) {
+      return res.status(500).json({ 
+        success: false, 
+        error: "Python скрипт не найден",
+        details: `Ожидается: ${pythonScriptPath}`
+      });
+    }
     
     // Опции для PythonShell
     const options = {
       mode: 'text',
-      pythonPath: 'python', // или 'python3' на Linux/Mac
+      pythonPath: process.platform === 'win32' ? 'python' : 'python3',
       pythonOptions: ['-u'],
       scriptPath: path.join(__dirname, 'python'),
       args: [photoPath, outputName]
     };
+
+    console.log(`🐍 Запускаем Python скрипт: ${pythonScriptPath}`);
 
     // Запускаем Python скрипт
     PythonShell.run('processor.py', options, async (err, results) => {
@@ -392,13 +404,31 @@ app.post('/api/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
         return res.status(500).json({ 
           success: false, 
           error: "YOLO processing failed",
-          details: err.message 
+          details: err.message
         });
       }
+      
+      if (!results || results.length === 0) {
+        return res.status(500).json({ 
+          success: false, 
+          error: "Python скрипт ничего не вернул" 
+        });
+      }
+      
+      console.log("📤 Python результат:", results);
       
       // Результат - последняя строка вывода (путь к JSON)
       const jsonPath = results[results.length - 1].trim();
       const fullJsonPath = path.join(__dirname, 'python', jsonPath);
+      
+      // Проверяем существует ли файл
+      if (!fs.existsSync(fullJsonPath)) {
+        return res.status(500).json({ 
+          success: false, 
+          error: "JSON файл не найден",
+          details: fullJsonPath
+        });
+      }
       
       // Читаем JSON с 3D примитивом
       const primitiveData = JSON.parse(fs.readFileSync(fullJsonPath, 'utf8'));
@@ -483,5 +513,6 @@ app.listen(PORT, () => {
   console.log(`🚀 MIRROR backend running on port ${PORT}`);
   console.log(`📁 Generated files will be saved to: ${generatedDir}`);
   console.log(`📁 Uploads saved to: ${uploadsDir}`);
+  console.log(`📁 Python scripts in: ${pythonDir}`);
   console.log(`🖼️ TripoSR URL: ${TRIPOSR_URL}`);
 });
