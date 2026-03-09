@@ -361,7 +361,7 @@ app.get('/triposr-status', async (req, res) => {
 });
 
 // ============= 3D ИЗ ФОТО ЧЕРЕЗ YOLO =============
-app.post('/api/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
+app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "Photo is required" });
