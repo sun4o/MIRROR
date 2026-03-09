@@ -355,6 +355,130 @@ app.get('/triposr-status', async (req, res) => {
   }
 });
 
+// ============= 3D ИЗ ФОТО ЧЕРЕЗ YOLO =============
+import { PythonShell } from 'python-shell';
+
+app.post('/api/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "Photo is required" });
+    }
+
+    console.log(`📸 YOLO обработка: ${req.file.originalname}`);
+    
+    const photoPath = req.file.path;
+    const prompt = req.body.prompt || 'object';
+    const outputName = `yolo_${Date.now()}`;
+    
+    // Путь к Python скрипту
+    const pythonScript = path.join(__dirname, 'python', 'processor.py');
+    
+    // Опции для PythonShell
+    const options = {
+      mode: 'text',
+      pythonPath: 'python', // или 'python3' на Linux/Mac
+      pythonOptions: ['-u'],
+      scriptPath: path.join(__dirname, 'python'),
+      args: [photoPath, outputName]
+    };
+
+    // Запускаем Python скрипт
+    PythonShell.run('processor.py', options, async (err, results) => {
+      // Удаляем временное фото
+      try { fs.unlinkSync(photoPath); } catch (e) {}
+      
+      if (err) {
+        console.error("❌ Python ошибка:", err);
+        return res.status(500).json({ 
+          success: false, 
+          error: "YOLO processing failed",
+          details: err.message 
+        });
+      }
+      
+      // Результат - последняя строка вывода (путь к JSON)
+      const jsonPath = results[results.length - 1].trim();
+      const fullJsonPath = path.join(__dirname, 'python', jsonPath);
+      
+      // Читаем JSON с 3D примитивом
+      const primitiveData = JSON.parse(fs.readFileSync(fullJsonPath, 'utf8'));
+      
+      // Теперь отправляем в DeepSeek для улучшения
+      console.log(`🎨 Улучшаем через DeepSeek с промптом: "${prompt}"`);
+      
+      const deepseekResponse = await axios.post(
+        'https://api.deepseek.com/chat/completions',
+        {
+          model: 'deepseek-chat',
+          messages: [
+            { 
+              role: 'system', 
+              content: `Ты — генератор 3D объектов. У тебя есть примитивная 3D сетка объекта. 
+              Улучши её согласно запросу пользователя: добавь текстуры, детали, сделай фотореалистичной.
+              ВЕРНИ ТОЛЬКО УЛУЧШЕННУЮ 3D МОДЕЛЬ В ВИДЕ JSON С ПОЛЯМИ vertices, faces, colors, textures.` 
+            },
+            { 
+              role: 'user', 
+              content: `Примитивная сетка: ${JSON.stringify(primitiveData)}. 
+              Сделай из этого: ${prompt}. 
+              Добавь цвета, текстуры, детали. Верни JSON.` 
+            }
+          ],
+          temperature: 0.8,
+          max_tokens: 4000
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+          },
+        }
+      );
+      
+      let enhancedData = deepseekResponse.data.choices[0].message.content;
+      
+      // Очищаем от markdown
+      enhancedData = enhancedData.replace(/```json/g, '').replace(/```/g, '').trim();
+      
+      // Парсим JSON
+      let enhanced;
+      try {
+        enhanced = JSON.parse(enhancedData);
+      } catch (e) {
+        // Если не JSON, сохраняем как текст
+        enhanced = { raw: enhancedData };
+      }
+      
+      // Сохраняем улучшенную модель
+      const enhancedPath = path.join(generatedDir, `${outputName}_enhanced.json`);
+      fs.writeFileSync(enhancedPath, JSON.stringify(enhanced, null, 2));
+      
+      // Сохраняем примитив для отладки
+      const primitivePath = path.join(generatedDir, `${outputName}_primitive.json`);
+      fs.writeFileSync(primitivePath, JSON.stringify(primitiveData, null, 2));
+      
+      // Удаляем временный JSON из папки python
+      try { fs.unlinkSync(fullJsonPath); } catch (e) {}
+      
+      console.log(`✅ Готово! Модель сохранена: ${enhancedPath}`);
+      
+      res.json({
+        success: true,
+        primitive: `/generated/${outputName}_primitive.json`,
+        enhanced: `/generated/${outputName}_enhanced.json`,
+        message: "3D модель создана и улучшена"
+      });
+    });
+
+  } catch (error) {
+    console.error("❌ Ошибка:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 MIRROR backend running on port ${PORT}`);
   console.log(`📁 Generated files will be saved to: ${generatedDir}`);
