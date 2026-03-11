@@ -48,6 +48,19 @@ app.use(express.json());
 app.use('/generated', express.static(generatedDir));
 app.use('/uploads', express.static(uploadsDir));
 
+app.use(cors({
+  origin: [
+    'http://localhost:3000',      // React dev server
+    'http://localhost:3001',      // mirror-app server (если есть)
+    'https://mirror-production-1717.up.railway.app',  // сам бэкенд
+    'file://',                     // для Electron в продакшне
+    'null'                         // для локальных файлов
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
 // ============= TRIPOSR URL =============
 const TRIPOSR_URL = 'https://189d616e3137164fbd.gradio.live/'; // Локальный TripoSR
 
