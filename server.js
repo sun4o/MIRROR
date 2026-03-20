@@ -8,11 +8,90 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { Client, handle_file } from '@gradio/client';
 import { PythonShell } from 'python-shell';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Создаём HTTP сервер и WebSocket
+const server = createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://mirror-production-1717.up.railway.app',
+      'file://',
+      'null'
+    ],
+    credentials: true
+  }
+});
+
+// Хранилище комнат
+const rooms = new Map();
+
+// WebSocket обработчики
+io.on('connection', (socket) => {
+  console.log('🔌 Клиент подключен:', socket.id);
+
+  // Ведущий создаёт комнату
+  socket.on('presenter-join', (roomId) => {
+    const room = rooms.get(roomId);
+    if (room) {
+      room.presenter = socket.id;
+      socket.join(roomId);
+      console.log(`🎙️ Ведущий подключился к комнате ${roomId}`);
+    }
+  });
+
+  // Зритель подключается к комнате
+  socket.on('viewer-join', (roomId) => {
+    const room = rooms.get(roomId);
+    if (room) {
+      room.viewers.push(socket.id);
+      socket.join(roomId);
+      
+      if (room.content) {
+        socket.emit('content-update', room.content);
+      }
+      
+      io.to(roomId).emit('viewer-count', room.viewers.length);
+      console.log(`👥 Зритель подключился к комнате ${roomId}, всего: ${room.viewers.length}`);
+    }
+  });
+
+  // Ведущий обновляет контент
+  socket.on('content-update', (data) => {
+    const roomsList = Array.from(socket.rooms).filter(r => r !== socket.id);
+    roomsList.forEach(roomId => {
+      const room = rooms.get(roomId);
+      if (room && room.presenter === socket.id) {
+        room.content = data;
+        socket.to(roomId).emit('content-update', data);
+        console.log(`📺 Контент обновлён в комнате ${roomId}`);
+      }
+    });
+  });
+
+  // Отключение
+  socket.on('disconnect', () => {
+    rooms.forEach((room, roomId) => {
+      if (room.viewers.includes(socket.id)) {
+        room.viewers = room.viewers.filter(id => id !== socket.id);
+        io.to(roomId).emit('viewer-count', room.viewers.length);
+        console.log(`👋 Зритель отключился из комнаты ${roomId}, осталось: ${room.viewers.length}`);
+      }
+      if (room.presenter === socket.id) {
+        room.presenter = null;
+        console.log(`🎙️ Ведущий отключился из комнаты ${roomId}`);
+      }
+    });
+  });
+});
 
 // Создаём папки если их нет
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,32 +120,75 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-app.use(cors());
-app.use(express.json());
-
-// Раздаём статические файлы
-app.use('/generated', express.static(generatedDir));
-app.use('/uploads', express.static(uploadsDir));
-
 app.use(cors({
   origin: [
-    'http://localhost:3000',      // React dev server
-    'http://localhost:3001',      // mirror-app server (если есть)
-    'https://mirror-production-1717.up.railway.app',  // сам бэкенд
-    'file://',                     // для Electron в продакшне
-    'null'                         // для локальных файлов
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'https://mirror-production-1717.up.railway.app',
+    'file://',
+    'null'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
+app.use(express.json());
+
+// Раздаём статические файлы
+app.use('/generated', express.static(generatedDir));
+app.use('/uploads', express.static(uploadsDir));
+
 // ============= TRIPOSR URL =============
-const TRIPOSR_URL = 'https://189d616e3137164fbd.gradio.live/'; // Локальный TripoSR
+const TRIPOSR_URL = 'https://189d616e3137164fbd.gradio.live/';
+
+// ============= API ЭНДПОИНТЫ =============
 
 // Проверка сервера
 app.get("/", (req, res) => {
   res.send("MIRROR backend is running 🚀");
+});
+
+// ============= КОМНАТЫ =============
+app.get('/rooms', (req, res) => {
+  const roomsList = Array.from(rooms.values()).map(r => ({
+    id: r.id,
+    viewers: r.viewers.length,
+    hasPresenter: !!r.presenter,
+    createdAt: r.createdAt
+  }));
+  res.json({ rooms: roomsList });
+});
+
+app.get('/room/:roomId', (req, res) => {
+  const room = rooms.get(req.params.roomId);
+  if (!room) {
+    return res.status(404).json({ error: "Room not found" });
+  }
+  res.json({
+    id: room.id,
+    viewers: room.viewers.length,
+    hasPresenter: !!room.presenter,
+    content: room.content,
+    createdAt: room.createdAt
+  });
+});
+
+app.post('/create-room', (req, res) => {
+  const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const room = {
+    id: roomId,
+    presenter: null,
+    viewers: [],
+    content: null,
+    createdAt: new Date()
+  };
+  rooms.set(roomId, room);
+  
+  res.json({ 
+    roomId, 
+    qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://mirror-production-1717.up.railway.app/room/${roomId}` 
+  });
 });
 
 // ============= ЧАТ С DEEPSEEK =============
@@ -98,7 +220,7 @@ app.post("/chat", async (req, res) => {
   }
 });
 
-// ============= ГЕНЕРАЦИЯ КОДА ЧЕРЕЗ DEEPSEEK =============
+// ============= ГЕНЕРАЦИЯ КОДА =============
 app.post('/generate-code', async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -141,15 +263,11 @@ app.post('/generate-code', async (req, res) => {
     );
 
     let code = response.data.choices[0].message.content;
-    
-    // Очищаем код от возможных markdown
     code = code.replace(/```javascript/g, '').replace(/```/g, '').trim();
     
-    // Создаём имя файла
     const filename = `${prompt.replace(/\s+/g, '_')}_${Date.now()}.js`;
     const filePath = path.join(generatedDir, filename);
     
-    // Сохраняем файл
     fs.writeFileSync(filePath, code);
     
     console.log(`✅ Файл сохранён: ${filename}`);
@@ -171,7 +289,7 @@ app.post('/generate-code', async (req, res) => {
   }
 });
 
-// ============= ГЕНЕРАЦИЯ 3D ИЗ ИЗОБРАЖЕНИЯ ЧЕРЕЗ GRADIO CLIENT =============
+// ============= ГЕНЕРАЦИЯ 3D ИЗ ИЗОБРАЖЕНИЯ =============
 app.post('/generate-from-image', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
@@ -180,16 +298,13 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
 
     console.log(`📸 Получено изображение: ${req.file.originalname}`);
     
-    // Подключаемся к TripoSR
     const client = await Client.connect(TRIPOSR_URL);
     
-    // Шаг 1: Проверяем изображение
     console.log("🔄 Проверка изображения...");
     await client.predict("/check_input_image", {
       input_image: handle_file(req.file.path)
     });
     
-    // Шаг 2: Препроцессинг
     console.log("🔄 Препроцессинг...");
     const preprocessResult = await client.predict("/preprocess", {
       input_image: handle_file(req.file.path),
@@ -197,29 +312,24 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
       foreground_ratio: 0.85
     });
     
-    // Шаг 3: Генерация 3D модели
     console.log("🔄 Генерация 3D модели...");
     const generateResult = await client.predict("/generate", {
       image: preprocessResult.data,
       mc_resolution: 256
     });
     
-    // generateResult.data[0] - OBJ файл
     const modelData = generateResult.data[0];
     const modelPath = path.join(generatedDir, `model_${Date.now()}.obj`);
     
-    // Сохраняем модель
     if (modelData.url) {
       const response = await axios.get(modelData.url, { responseType: 'arraybuffer' });
       fs.writeFileSync(modelPath, response.data);
     } else if (modelData.path) {
       fs.copyFileSync(modelData.path, modelPath);
     } else {
-      // Если пришёл сам файл
       fs.writeFileSync(modelPath, modelData);
     }
     
-    // Удаляем временный файл
     fs.unlinkSync(req.file.path);
     
     console.log(`✅ 3D модель сохранена: ${path.basename(modelPath)}`);
@@ -245,7 +355,7 @@ app.post('/generate-from-image', upload.single('image'), async (req, res) => {
   }
 });
 
-// ============= УЛУЧШЕНИЕ МОДЕЛИ ЧЕРЕЗ DEEPSEEK =============
+// ============= УЛУЧШЕНИЕ МОДЕЛИ =============
 app.post('/enhance-3d', async (req, res) => {
   try {
     const { modelPath, prompt } = req.body;
@@ -312,7 +422,7 @@ app.post('/enhance-3d', async (req, res) => {
   }
 });
 
-// ============= ПОЛУЧИТЬ СПИСОК СГЕНЕРИРОВАННЫХ ФАЙЛОВ =============
+// ============= ПОЛУЧИТЬ СПИСОК ФАЙЛОВ =============
 app.get('/generated-files', (req, res) => {
   try {
     const files = fs.readdirSync(generatedDir)
@@ -356,7 +466,7 @@ app.get('/file/:filename', (req, res) => {
   }
 });
 
-// ============= ПРОВЕРКА TRIPOSR СТАТУСА =============
+// ============= ПРОВЕРКА TRIPOSR =============
 app.get('/triposr-status', async (req, res) => {
   try {
     const client = await Client.connect(TRIPOSR_URL);
@@ -373,7 +483,7 @@ app.get('/triposr-status', async (req, res) => {
   }
 });
 
-// ============= 3D ИЗ ФОТО ЧЕРЕЗ YOLO =============
+// ============= YOLO ОБРАБОТКА =============
 app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
   try {
     if (!req.file) {
@@ -386,7 +496,6 @@ app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
     const prompt = req.body.prompt || 'object';
     const outputName = `yolo_${Date.now()}`;
     
-    // Проверяем существование Python скрипта
     const pythonScriptPath = path.join(__dirname, 'python', 'processor.py');
     if (!fs.existsSync(pythonScriptPath)) {
       return res.status(500).json({ 
@@ -396,7 +505,6 @@ app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
       });
     }
     
-    // Опции для PythonShell
     const options = {
       mode: 'text',
       pythonPath: process.platform === 'win32' ? 'python' : 'python3',
@@ -407,9 +515,7 @@ app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
 
     console.log(`🐍 Запускаем Python скрипт: ${pythonScriptPath}`);
 
-    // Запускаем Python скрипт
     PythonShell.run('processor.py', options, async (err, results) => {
-      // Удаляем временное фото
       try { fs.unlinkSync(photoPath); } catch (e) {}
       
       if (err) {
@@ -430,11 +536,9 @@ app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
       
       console.log("📤 Python результат:", results);
       
-      // Результат - последняя строка вывода (путь к JSON)
       const jsonPath = results[results.length - 1].trim();
       const fullJsonPath = path.join(__dirname, 'python', jsonPath);
       
-      // Проверяем существует ли файл
       if (!fs.existsSync(fullJsonPath)) {
         return res.status(500).json({ 
           success: false, 
@@ -443,10 +547,8 @@ app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
         });
       }
       
-      // Читаем JSON с 3D примитивом
       const primitiveData = JSON.parse(fs.readFileSync(fullJsonPath, 'utf8'));
       
-      // Теперь отправляем в DeepSeek для улучшения
       console.log(`🎨 Улучшаем через DeepSeek с промптом: "${prompt}"`);
       
       const deepseekResponse = await axios.post(
@@ -479,28 +581,21 @@ app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
       );
       
       let enhancedData = deepseekResponse.data.choices[0].message.content;
-      
-      // Очищаем от markdown
       enhancedData = enhancedData.replace(/```json/g, '').replace(/```/g, '').trim();
       
-      // Парсим JSON
       let enhanced;
       try {
         enhanced = JSON.parse(enhancedData);
       } catch (e) {
-        // Если не JSON, сохраняем как текст
         enhanced = { raw: enhancedData };
       }
       
-      // Сохраняем улучшенную модель
       const enhancedPath = path.join(generatedDir, `${outputName}_enhanced.json`);
       fs.writeFileSync(enhancedPath, JSON.stringify(enhanced, null, 2));
       
-      // Сохраняем примитив для отладки
       const primitivePath = path.join(generatedDir, `${outputName}_primitive.json`);
       fs.writeFileSync(primitivePath, JSON.stringify(primitiveData, null, 2));
       
-      // Удаляем временный JSON из папки python
       try { fs.unlinkSync(fullJsonPath); } catch (e) {}
       
       console.log(`✅ Готово! Модель сохранена: ${enhancedPath}`);
@@ -522,10 +617,113 @@ app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// ============= ГЕНЕРАЦИЯ МИРОВ ЧЕРЕЗ DEEPSEEK =============
+app.post('/generate-world', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required" });
+    }
+
+    console.log(`🌍 Генерация мира для: "${prompt}"`);
+
+    const response = await axios.post(
+      'https://api.deepseek.com/chat/completions',
+      {
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: `Ты — генератор миров для 3D игры. Верни ТОЛЬКО JSON без пояснений:
+            {
+              "terrain": {
+                "type": "равнины|горы|лес|пустыня",
+                "scale": 100,
+                "height": 5
+              },
+              "objects": [
+                {
+                  "type": "tree",
+                  "count": 10,
+                  "distribution": "random"
+                },
+                {
+                  "type": "rock",
+                  "count": 5,
+                  "distribution": "random"
+                },
+                {
+                  "type": "house",
+                  "count": 2,
+                  "distribution": "random"
+                }
+              ],
+              "weather": "ясно|дождь|туман|снег",
+              "lighting": "день|вечер|ночь"
+            }`
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.8,
+        max_tokens: 2000
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        },
+      }
+    );
+
+    let content = response.data.choices[0].message.content;
+    // Очищаем от markdown
+    content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    // Парсим JSON
+    let worldConfig;
+    try {
+      worldConfig = JSON.parse(content);
+    } catch (e) {
+      console.error('Ошибка парсинга JSON:', e);
+      // Если не удалось распарсить, возвращаем мир по умолчанию
+      worldConfig = {
+        terrain: { type: "равнины", scale: 100, height: 5 },
+        objects: [
+          { type: "tree", count: 15, distribution: "random" },
+          { type: "rock", count: 8, distribution: "random" },
+          { type: "house", count: 3, distribution: "random" }
+        ],
+        weather: "ясно",
+        lighting: "день"
+      };
+    }
+    
+    console.log(`✅ Мир сгенерирован: ${worldConfig.terrain.type}`);
+    
+    res.json({
+      success: true,
+      world: worldConfig
+    });
+
+  } catch (error) {
+    console.error("❌ Ошибка генерации мира:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Запускаем сервер (HTTP + WebSocket)
+server.listen(PORT, () => {
   console.log(`🚀 MIRROR backend running on port ${PORT}`);
   console.log(`📁 Generated files will be saved to: ${generatedDir}`);
   console.log(`📁 Uploads saved to: ${uploadsDir}`);
   console.log(`📁 Python scripts in: ${pythonDir}`);
   console.log(`🖼️ TripoSR URL: ${TRIPOSR_URL}`);
+  console.log(`🔌 WebSocket server is running`);
 });
