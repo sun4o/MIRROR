@@ -617,6 +617,55 @@ app.post('/photo-to-3d-yolo', upload.single('photo'), async (req, res) => {
   }
 });
 
+// ============= NPC ДИАЛОГ =============
+app.post('/npc-talk', async (req, res) => {
+  try {
+    const { type, message } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+    
+    console.log(`💬 NPC ${type} говорит: "${message}"`);
+    
+    const response = await axios.post(
+      'https://api.deepseek.com/chat/completions',
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { 
+            role: 'system', 
+            content: `Ты NPC в игре. Отвечай кратко (1-2 предложения), эмоционально. Тип: ${type}. Ты находишься в мире фэнтези. Общайся с игроком.` 
+          },
+          { 
+            role: 'user', 
+            content: message 
+          }
+        ],
+        temperature: 0.8
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        },
+      }
+    );
+    
+    const text = response.data.choices[0].message.content;
+    console.log(`🤖 NPC ответил: "${text}"`);
+    
+    res.json({ reply: text });
+    
+  } catch (error) {
+    console.error("❌ NPC talk error:", error.response?.data || error.message);
+    res.status(500).json({ 
+      error: "NPC talk failed",
+      reply: "Извини, я сейчас не могу говорить."
+    });
+  }
+});
+
 // ============= ГЕНЕРАЦИЯ МИРОВ ЧЕРЕЗ DEEPSEEK =============
 app.post('/generate-world', async (req, res) => {
   try {
