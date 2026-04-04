@@ -767,6 +767,131 @@ app.post('/generate-world', async (req, res) => {
   }
 });
 
+// ============= ПРЕЗЕНТЕР: ГЕНЕРАЦИЯ СЛАЙДА =============
+app.post('/presenter/generate', async (req, res) => {
+  try {
+    const { speech, targetLanguage = 'ru' } = req.body;
+    
+    if (!speech) {
+      return res.status(400).json({ error: "Speech text is required" });
+    }
+
+    console.log(`🎤 Генерация слайда из речи: "${speech}"`);
+
+    const systemPrompt = `Ты — JARVIS, создаёшь слайды для презентации из речи ведущего.
+
+ВАЖНО:
+1. Используй web_search для поиска актуальных изображений и данных
+2. Выделяй ключевые моменты жирным (**текст**)
+3. Верни ТОЛЬКО JSON, без пояснений
+
+Структура ответа:
+{
+  "title": "Заголовок слайда (кратко, ёмко)",
+  "content": "Основной текст с **жирными** выделениями важных моментов",
+  "imageUrls": ["максимум 2 ссылки на релевантные изображения из поиска"],
+  "keyPoints": ["ключевой момент 1", "ключевой момент 2", "ключевой момент 3"],
+  "suggestion": "Подсказка: что можно добавить или уточнить (если нужно)",
+  "visual": {
+    "type": "text",
+    "data": null
+  },
+  "translations": {
+    "en": "English translation of content",
+    "zh": "中文翻译",
+    "de": "Deutsche Übersetzung",
+    "fr": "Traduction française",
+    "es": "Traducción española"
+  }
+}
+
+Если речь содержит просьбу показать график (цифры, проценты, рост/падение) — заполни visual:
+{
+  "type": "chart",
+  "data": {
+    "labels": ["Q1", "Q2", "Q3", "Q4"],
+    "values": [10, 25, 40, 35],
+    "title": "Заголовок графика"
+  }
+}
+
+Если речь содержит просьбу показать 3D объект (дом, машина, дерево и т.д.) — заполни visual:
+{
+  "type": "3d",
+  "data": {
+    "model": "house",
+    "prompt": "деревянный дом с крышей"
+  }
+}
+
+Речь ведущего: ${speech}`;
+
+    const response = await axios.post(
+      'https://api.deepseek.com/v1/chat/completions',
+      {
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: speech }
+        ],
+        temperature: 0.7,
+        max_tokens: 2000
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        },
+      }
+    );
+
+    let content = response.data.choices[0].message.content;
+    // Очищаем от markdown
+    content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    let slideData;
+    try {
+      slideData = JSON.parse(content);
+    } catch (e) {
+      console.error('Ошибка парсинга JSON:', e);
+      // Возвращаем базовый слайд если парсинг не удался
+      slideData = {
+        title: "Генерация слайда",
+        content: speech,
+        imageUrls: [],
+        keyPoints: [],
+        suggestion: null,
+        visual: { type: "text", data: null },
+        translations: { en: speech, zh: speech, de: speech, fr: speech, es: speech }
+      };
+    }
+    
+    console.log(`✅ Слайд сгенерирован: "${slideData.title}"`);
+    
+    res.json({
+      success: true,
+      slide: slideData
+    });
+
+  } catch (error) {
+    console.error("❌ Ошибка генерации слайда:", error.response?.data || error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      slide: {
+        title: "Ошибка генерации",
+        content: "Не удалось сгенерировать слайд. Попробуйте ещё раз.",
+        imageUrls: [],
+        keyPoints: [],
+        suggestion: null,
+        visual: { type: "text", data: null },
+        translations: {}
+      }
+    });
+  }
+});
+
+
 // Запускаем сервер (HTTP + WebSocket)
 server.listen(PORT, () => {
   console.log(`🚀 MIRROR backend running on port ${PORT}`);
