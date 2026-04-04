@@ -780,24 +780,29 @@ app.post('/presenter/generate', async (req, res) => {
 
     const systemPrompt = `Ты — JARVIS, создаёшь слайды для презентации из речи ведущего.
 
-ВАЖНО:
+ВАЖНЕЙШЕЕ ПРАВИЛО:
+Слайд должен быть ТОЧНО по теме речи ведущего. Не придумывай свою тему. Что сказал ведущий — то и раскрывай.
+
+ПРАВИЛА:
 1. Используй web_search для поиска актуальных изображений и данных
 2. Выделяй ключевые моменты жирным (**текст**)
 3. Верни ТОЛЬКО JSON, без пояснений
+4. Заголовок должен отражать суть речи
+5. Контент должен быть строго по теме речи
 
 Структура ответа:
 {
-  "title": "Заголовок слайда (кратко, ёмко)",
-  "content": "Основной текст с **жирными** выделениями важных моментов",
-  "imageUrls": ["максимум 2 ссылки на релевантные изображения из поиска"],
+  "title": "Заголовок слайда (строго по теме речи)",
+  "content": "Подробный текст по теме речи с **жирными** выделениями важных моментов",
+  "imageUrls": ["максимум 2 ссылки на релевантные изображения"],
   "keyPoints": ["ключевой момент 1", "ключевой момент 2", "ключевой момент 3"],
-  "suggestion": "Подсказка: что можно добавить или уточнить (если нужно)",
+  "suggestion": "Подсказка (если ведущий упустил важную деталь)",
   "visual": {
     "type": "text",
     "data": null
   },
   "translations": {
-    "en": "English translation of content",
+    "en": "English translation",
     "zh": "中文翻译",
     "de": "Deutsche Übersetzung",
     "fr": "Traduction française",
@@ -846,7 +851,6 @@ app.post('/presenter/generate', async (req, res) => {
     );
 
     let content = response.data.choices[0].message.content;
-    // Очищаем от markdown
     content = content.replace(/```json/g, '').replace(/```/g, '').trim();
     
     let slideData;
@@ -854,7 +858,6 @@ app.post('/presenter/generate', async (req, res) => {
       slideData = JSON.parse(content);
     } catch (e) {
       console.error('Ошибка парсинга JSON:', e);
-      // Возвращаем базовый слайд если парсинг не удался
       slideData = {
         title: "Генерация слайда",
         content: speech,
