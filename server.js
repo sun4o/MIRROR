@@ -38,68 +38,69 @@ const rooms = new Map();
 io.on('connection', (socket) => {
   console.log('🔌 Клиент подключен:', socket.id);
 
-  // Ведущий создаёт комнату
+  // Ведущий создаёт/подключается к комнате
   socket.on('presenter-join', (roomId) => {
-    console.log(`🎙️ ПОПЫТКА ПОДКЛЮЧЕНИЯ ВЕДУЩЕГО к комнате ${roomId}`);
-    console.log(`📋 Существующие комнаты:`, Array.from(rooms.keys()));
+    console.log(`🎙️ Ведущий подключается к комнате ${roomId}`);
     
-    const room = rooms.get(roomId);
-    if (room) {
-      room.presenter = socket.id;
-      socket.join(roomId);
-      console.log(`✅ Ведущий подключился к комнате ${roomId}, socket: ${socket.id}`);
-      console.log(`📊 Комната ${roomId}: presenter=${room.presenter}, viewers=${room.viewers.length}`);
+    let room = rooms.get(roomId);
+    if (!room) {
+      room = { presenter: socket.id, viewers: [], content: null };
+      rooms.set(roomId, room);
     } else {
-      console.log(`❌ Комната ${roomId} не найдена!`);
+      room.presenter = socket.id;
     }
+    
+    socket.join(roomId);
+    socket.emit('room-joined', { roomId, role: 'presenter' });
+    console.log(`✅ Ведущий подключен к комнате ${roomId}, всего комнат: ${rooms.size}`);
   });
 
   // Зритель подключается к комнате
   socket.on('viewer-join', (roomId) => {
-    console.log(`👥 ПОПЫТКА ПОДКЛЮЧЕНИЯ ЗРИТЕЛЯ к комнате ${roomId}`);
-    console.log(`📋 Существующие комнаты:`, Array.from(rooms.keys()));
+    console.log(`👥 Зритель подключается к комнате ${roomId}`);
     
     const room = rooms.get(roomId);
-    if (room) {
-      room.viewers.push(socket.id);
-      socket.join(roomId);
-      console.log(`✅ Зритель подключился к комнате ${roomId}, socket: ${socket.id}`);
-      console.log(`📊 Комната ${roomId}: presenter=${room.presenter}, viewers=${room.viewers.length}`);
-      
-      if (room.content) {
-        console.log(`📤 Отправка сохранённого контента зрителю`);
-        socket.emit('content-update', room.content);
-      }
-    } else {
-      console.log(`❌ Комната ${roomId} не найдена!`);
+    if (!room || !room.presenter) {
+      socket.emit('room-error', 'Комната не найдена или нет ведущего');
+      console.log(`❌ Комната ${roomId} не найдена или нет ведущего`);
+      return;
     }
+    
+    room.viewers.push(socket.id);
+    socket.join(roomId);
+    socket.emit('room-joined', { roomId, role: 'viewer' });
+    
+    // Отправляем текущий контент если есть
+    if (room.content) {
+      socket.emit('content-update', room.content);
+    }
+    
+    // Обновляем счетчик зрителей
+    io.to(roomId).emit('viewer-count', room.viewers.length);
+    console.log(`✅ Зритель подключен к комнате ${roomId}, зрителей: ${room.viewers.length}`);
   });
 
-  // Ведущий обновляет контент (слайды)
+  // Обновление контента (слайды)
   socket.on('content-update', (data) => {
     const roomsList = Array.from(socket.rooms).filter(r => r !== socket.id);
-    console.log(`📺 content-update от ${socket.id}, комнаты:`, roomsList);
-    
     roomsList.forEach(roomId => {
       const room = rooms.get(roomId);
       if (room && room.presenter === socket.id) {
         room.content = data;
         socket.to(roomId).emit('content-update', data);
-        console.log(`📺 Контент обновлён в комнате ${roomId}`);
+        console.log(`📺 Контент отправлен в комнату ${roomId}`);
       }
     });
   });
 
-  // Ведущий отправляет 3D объект
+  // 3D объект
   socket.on('3d-object-update', (data) => {
     const roomsList = Array.from(socket.rooms).filter(r => r !== socket.id);
-    console.log(`🎮 3d-object-update от ${socket.id}, комнаты:`, roomsList);
-    
     roomsList.forEach(roomId => {
       const room = rooms.get(roomId);
       if (room && room.presenter === socket.id) {
-        console.log(`🎮 3D объект отправлен в комнату ${roomId}:`, data.type);
         socket.to(roomId).emit('3d-object-update', data);
+        console.log(`🎮 3D объект отправлен в комнату ${roomId}`);
       }
     });
   });
@@ -108,14 +109,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log(`🔌 Клиент отключился: ${socket.id}`);
     rooms.forEach((room, roomId) => {
-      if (room.viewers.includes(socket.id)) {
-        room.viewers = room.viewers.filter(id => id !== socket.id);
-        io.to(roomId).emit('viewer-count', room.viewers.length);
-        console.log(`👋 Зритель отключился из комнаты ${roomId}, осталось: ${room.viewers.length}`);
-      }
       if (room.presenter === socket.id) {
         room.presenter = null;
         console.log(`🎙️ Ведущий отключился из комнаты ${roomId}`);
+      }
+      if (room.viewers.includes(socket.id)) {
+        room.viewers = room.viewers.filter(id => id !== socket.id);
+        io.to(roomId).emit('viewer-count', room.viewers.length);
+        console.log(`👋 Зритель отключился из комнаты ${roomId}`);
       }
     });
   });
@@ -202,23 +203,11 @@ app.get('/room/:roomId', (req, res) => {
   });
 });
 
+// Эндпоинт для создания комнаты
 app.post('/create-room', (req, res) => {
   const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-  const room = {
-    id: roomId,
-    presenter: null,
-    viewers: [],
-    content: null,
-    createdAt: new Date()
-  };
-  rooms.set(roomId, room);
-  
   console.log(`🏠 СОЗДАНА КОМНАТА: ${roomId}`);
-  
-  res.json({ 
-    roomId, 
-    qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`https://mirror-production-1717.up.railway.app/room/${roomId}`)}` 
-  });
+  res.json({ roomId });
 });
 
 // ============= ЧАТ С DEEPSEEK =============
@@ -921,17 +910,6 @@ app.post('/presenter/generate', async (req, res) => {
   }
 });
 
-// Получить все комнаты (для отладки)
-app.get('/debug-rooms', (req, res) => {
-  const roomsList = Array.from(rooms.entries()).map(([id, room]) => ({
-    id,
-    presenter: room.presenter,
-    viewersCount: room.viewers.length,
-    viewers: room.viewers,
-    hasContent: !!room.content
-  }));
-  res.json({ rooms: roomsList, total: rooms.size });
-});
 
 // Запускаем сервер (HTTP + WebSocket)
 server.listen(PORT, () => {
