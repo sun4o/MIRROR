@@ -214,12 +214,10 @@ app.post('/create-room', (req, res) => {
   rooms.set(roomId, room);
   
   console.log(`🏠 СОЗДАНА КОМНАТА: ${roomId}`);
-  console.log(`📊 Всего комнат: ${rooms.size}`);
-  console.log(`📋 Список комнат:`, Array.from(rooms.keys()));
   
   res.json({ 
     roomId, 
-    qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://mirror-production-1717.up.railway.app/room/${roomId}` 
+    qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`https://mirror-production-1717.up.railway.app/room/${roomId}`)}` 
   });
 });
 
