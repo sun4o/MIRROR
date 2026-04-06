@@ -921,6 +921,17 @@ app.post('/presenter/generate', async (req, res) => {
   }
 });
 
+// Получить все комнаты (для отладки)
+app.get('/debug-rooms', (req, res) => {
+  const roomsList = Array.from(rooms.entries()).map(([id, room]) => ({
+    id,
+    presenter: room.presenter,
+    viewersCount: room.viewers.length,
+    viewers: room.viewers,
+    hasContent: !!room.content
+  }));
+  res.json({ rooms: roomsList, total: rooms.size });
+});
 
 // Запускаем сервер (HTTP + WebSocket)
 server.listen(PORT, () => {
