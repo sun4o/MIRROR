@@ -64,7 +64,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Ведущий обновляет контент
+  // Ведущий обновляет контент (слайды)
   socket.on('content-update', (data) => {
     const roomsList = Array.from(socket.rooms).filter(r => r !== socket.id);
     roomsList.forEach(roomId => {
@@ -73,6 +73,18 @@ io.on('connection', (socket) => {
         room.content = data;
         socket.to(roomId).emit('content-update', data);
         console.log(`📺 Контент обновлён в комнате ${roomId}`);
+      }
+    });
+  });
+
+  // Ведущий отправляет 3D объект
+  socket.on('3d-object-update', (data) => {
+    const roomsList = Array.from(socket.rooms).filter(r => r !== socket.id);
+    roomsList.forEach(roomId => {
+      const room = rooms.get(roomId);
+      if (room && room.presenter === socket.id) {
+        console.log(`🎮 3D объект отправлен в комнату ${roomId}:`, data.type);
+        socket.to(roomId).emit('3d-object-update', data);
       }
     });
   });
@@ -729,16 +741,13 @@ app.post('/generate-world', async (req, res) => {
     );
 
     let content = response.data.choices[0].message.content;
-    // Очищаем от markdown
     content = content.replace(/```json/g, '').replace(/```/g, '').trim();
     
-    // Парсим JSON
     let worldConfig;
     try {
       worldConfig = JSON.parse(content);
     } catch (e) {
       console.error('Ошибка парсинга JSON:', e);
-      // Если не удалось распарсить, возвращаем мир по умолчанию
       worldConfig = {
         terrain: { type: "равнины", scale: 100, height: 5 },
         objects: [
