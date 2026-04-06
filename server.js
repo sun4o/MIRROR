@@ -38,49 +38,33 @@ const rooms = new Map();
 io.on('connection', (socket) => {
   console.log('🔌 Клиент подключен:', socket.id);
 
-  // Ведущий создаёт/подключается к комнате
+  // Ведущий создаёт комнату
   socket.on('presenter-join', (roomId) => {
-    console.log(`🎙️ Ведущий подключается к комнате ${roomId}`);
-    
-    let room = rooms.get(roomId);
-    if (!room) {
-      room = { presenter: socket.id, viewers: [], content: null };
-      rooms.set(roomId, room);
-    } else {
+    const room = rooms.get(roomId);
+    if (room) {
       room.presenter = socket.id;
+      socket.join(roomId);
+      console.log(`🎙️ Ведущий подключился к комнате ${roomId}`);
     }
-    
-    socket.join(roomId);
-    socket.emit('room-joined', { roomId, role: 'presenter' });
-    console.log(`✅ Ведущий подключен к комнате ${roomId}, всего комнат: ${rooms.size}`);
   });
 
   // Зритель подключается к комнате
   socket.on('viewer-join', (roomId) => {
-    console.log(`👥 Зритель подключается к комнате ${roomId}`);
-    
     const room = rooms.get(roomId);
-    if (!room || !room.presenter) {
-      socket.emit('room-error', 'Комната не найдена или нет ведущего');
-      console.log(`❌ Комната ${roomId} не найдена или нет ведущего`);
-      return;
+    if (room) {
+      room.viewers.push(socket.id);
+      socket.join(roomId);
+      
+      if (room.content) {
+        socket.emit('content-update', room.content);
+      }
+      
+      io.to(roomId).emit('viewer-count', room.viewers.length);
+      console.log(`👥 Зритель подключился к комнате ${roomId}, всего: ${room.viewers.length}`);
     }
-    
-    room.viewers.push(socket.id);
-    socket.join(roomId);
-    socket.emit('room-joined', { roomId, role: 'viewer' });
-    
-    // Отправляем текущий контент если есть
-    if (room.content) {
-      socket.emit('content-update', room.content);
-    }
-    
-    // Обновляем счетчик зрителей
-    io.to(roomId).emit('viewer-count', room.viewers.length);
-    console.log(`✅ Зритель подключен к комнате ${roomId}, зрителей: ${room.viewers.length}`);
   });
 
-  // Обновление контента (слайды)
+  // Ведущий обновляет контент
   socket.on('content-update', (data) => {
     const roomsList = Array.from(socket.rooms).filter(r => r !== socket.id);
     roomsList.forEach(roomId => {
@@ -88,7 +72,7 @@ io.on('connection', (socket) => {
       if (room && room.presenter === socket.id) {
         room.content = data;
         socket.to(roomId).emit('content-update', data);
-        console.log(`📺 Контент отправлен в комнату ${roomId}`);
+        console.log(`📺 Контент обновлён в комнате ${roomId}`);
       }
     });
   });
@@ -107,16 +91,15 @@ io.on('connection', (socket) => {
 
   // Отключение
   socket.on('disconnect', () => {
-    console.log(`🔌 Клиент отключился: ${socket.id}`);
     rooms.forEach((room, roomId) => {
-      if (room.presenter === socket.id) {
-        room.presenter = null;
-        console.log(`🎙️ Ведущий отключился из комнаты ${roomId}`);
-      }
       if (room.viewers.includes(socket.id)) {
         room.viewers = room.viewers.filter(id => id !== socket.id);
         io.to(roomId).emit('viewer-count', room.viewers.length);
-        console.log(`👋 Зритель отключился из комнаты ${roomId}`);
+        console.log(`👋 Зритель отключился из комнаты ${roomId}, осталось: ${room.viewers.length}`);
+      }
+      if (room.presenter === socket.id) {
+        room.presenter = null;
+        console.log(`🎙️ Ведущий отключился из комнаты ${roomId}`);
       }
     });
   });
@@ -203,11 +186,21 @@ app.get('/room/:roomId', (req, res) => {
   });
 });
 
-// Эндпоинт для создания комнаты
 app.post('/create-room', (req, res) => {
   const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-  console.log(`🏠 СОЗДАНА КОМНАТА: ${roomId}`);
-  res.json({ roomId });
+  const room = {
+    id: roomId,
+    presenter: null,
+    viewers: [],
+    content: null,
+    createdAt: new Date()
+  };
+  rooms.set(roomId, room);
+  
+  res.json({ 
+    roomId, 
+    qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https://mirror-production-1717.up.railway.app/room/${roomId}` 
+  });
 });
 
 // ============= ЧАТ С DEEPSEEK =============
