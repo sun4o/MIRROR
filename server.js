@@ -57,22 +57,22 @@ io.on('connection', (socket) => {
 
   // Зритель подключается к комнате
   socket.on('viewer-join', (roomId) => {
-    console.log(`👥 Зритель подключается к комнате ${roomId}`);
+    console.log(`👥 [viewer-join] Зритель ${socket.id} подключается к комнате ${roomId}`);
     
     const room = rooms.get(roomId);
     if (!room || !room.presenter) {
       socket.emit('room-error', 'Комната не найдена или нет ведущего');
-      console.log(`❌ Комната ${roomId} не найдена`);
+      console.log(`❌ [viewer-join] Комната ${roomId} не найдена`);
       return;
     }
     
     room.viewers.push(socket.id);
     socket.join(roomId);
-    console.log(`✅ Зритель в комнате ${roomId}, его rooms:`, Array.from(socket.rooms));
-    socket.emit('room-joined', { roomId, role: 'viewer' });
+    console.log(`✅ [viewer-join] Зритель ${socket.id} добавлен в комнату ${roomId}`);
+    console.log(`📋 [viewer-join] Текущие комнаты сокета:`, Array.from(socket.rooms));
     
     if (room.content) {
-      console.log(`📤 Отправка сохранённого контента новому зрителю в комнату ${roomId}`);
+      console.log(`📤 [viewer-join] Отправка сохранённого контента зрителю ${socket.id}`);
       socket.emit('content-update', room.content);
     }
     
@@ -81,16 +81,27 @@ io.on('connection', (socket) => {
 
   // Обновление контента (слайды)
   socket.on('content-update', (data) => {
-    // Получаем комнату, в которой находится сокет (кроме его собственного ID)
+    console.log(`📺 [content-update] Получено от ${socket.id}`);
+    console.log(`📺 [content-update] Данные:`, data?.title || 'без заголовка');
+    
     const roomIds = Array.from(socket.rooms).filter(r => r !== socket.id);
-    console.log(`📺 content-update от ${socket.id}, комнаты:`, roomIds);
+    console.log(`📺 [content-update] Комнаты отправителя:`, roomIds);
+    
+    if (roomIds.length === 0) {
+      console.error(`❌ [content-update] Отправитель ${socket.id} не состоит ни в одной комнате!`);
+      return;
+    }
     
     roomIds.forEach(roomId => {
       const room = rooms.get(roomId);
+      console.log(`📺 [content-update] Комната ${roomId}: presenter=${room?.presenter}, текущий socket=${socket.id}`);
+      
       if (room && room.presenter === socket.id) {
         room.content = data;
-        console.log(`📺 Рассылка слайда в комнату ${roomId}, зрителей: ${room.viewers.length}`);
+        console.log(`📺 [content-update] Рассылка слайда в комнату ${roomId}, зрителей: ${room.viewers.length}`);
         socket.to(roomId).emit('content-update', data);
+      } else {
+        console.log(`📺 [content-update] Отправитель ${socket.id} не является презентером комнаты ${roomId}`);
       }
     });
   });
