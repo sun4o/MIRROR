@@ -59,6 +59,17 @@ io.on('connection', (socket) => {
   socket.emit('room-joined', { roomId, role: 'presenter' });
 });
 
+
+  socket.on('camera-update', (data) => {
+    const roomsList = Array.from(socket.rooms).filter(r => r !== socket.id);
+    roomsList.forEach(roomId => {
+      const room = rooms.get(roomId);
+      if (room && room.presenter === socket.id) {
+        socket.to(roomId).emit('camera-update', data);
+      }
+    });
+  });
+
   // Зритель подключается к комнате
   socket.on('viewer-join', (roomId) => {
     console.log(`👥 [viewer-join] Зритель ${socket.id} подключается к комнате ${roomId}`);
