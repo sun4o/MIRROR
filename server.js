@@ -37,6 +37,10 @@ const rooms = new Map();
 // WebSocket обработчики
 io.on('connection', (socket) => {
   console.log('🔌 Клиент подключен:', socket.id);
+
+  socket.onAny((event, ...args) => {
+    console.log(`📡 [socket] Событие: ${event}`, args);
+  });
   
   // Ведущий создаёт/подключается к комнате
   socket.on('presenter-join', (roomId) => {
